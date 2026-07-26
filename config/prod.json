@@ -1,0 +1,6 @@
+{
+  "_comment": "Production. Both must be HTTPS — release builds refuse cleartext traffic.",
+
+  "API_BASE_URL": "https://api.facedeliver.shop/api",
+  "WEB_ORIGIN": "https://facedeliver.shop"
+}

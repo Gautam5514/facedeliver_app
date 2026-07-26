@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY.
+
+  Gradle resource merging makes this file replace the strict one in
+  src/main/res/xml for debug variants. It permits plain HTTP everywhere so the
+  app can reach a backend running on a laptop at any LAN address, which changes
+  every time you join a different network.
+
+  Release builds keep src/main/res/xml/network_security_config.xml, which
+  refuses cleartext outright. Nothing here ships.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
