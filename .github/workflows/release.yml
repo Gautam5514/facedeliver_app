@@ -1,28 +1,29 @@
-name: Release to Play Store
+name: Build Android App Bundle
 
 # Builds a signed Android App Bundle and uploads it to the Play Console.
 #
-# Triggers on a version tag (e.g. v1.0.1) so you control exactly which commit
-# ships — a push to main alone will NOT release. You can also run it by hand
-# from the Actions tab (workflow_dispatch).
+# Every push to main builds a signed Android App Bundle and saves it as a
+# downloadable workflow artifact. Play upload stays disabled until the
+# ENABLE_PLAY_UPLOAD repository variable is explicitly set to "true".
 #
-# Required repository secrets (Settings → Secrets and variables → Actions):
+# Required repository secrets for signed build artifacts:
 #   ANDROID_KEYSTORE_BASE64   base64 of android/keystore/facedeliver-upload-key.jks
 #   KEYSTORE_PASSWORD         the store password
 #   KEY_PASSWORD              the key password
 #   KEY_ALIAS                 the key alias (facedeliver-upload)
+# Required only after Play upload is enabled:
 #   PLAY_SERVICE_ACCOUNT_JSON the full JSON of the Play service account key
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       track:
         description: 'Play track to deploy to'
         required: true
-        default: 'internal'
+        default: 'alpha'
         type: choice
         options:
           - internal
@@ -32,6 +33,12 @@ on:
 
 permissions:
   contents: read
+
+# If main is pushed several times in quick succession, only publish the newest
+# commit. Google Play accepts only one edit for an app at a time.
+concurrency:
+  group: play-store-release
+  cancel-in-progress: true
 
 jobs:
   build-and-release:
@@ -82,7 +89,11 @@ jobs:
 
       - name: Build signed App Bundle
         run: |
+          # A Unix timestamp is monotonic and remains below Android's maximum
+          # versionCode until 2036, so every main-branch build is uploadable.
+          RELEASE_BUILD_NUMBER="$(date +%s)"
           flutter build appbundle --release \
+            --build-number="$RELEASE_BUILD_NUMBER" \
             --dart-define-from-file=config/prod.json
 
       - name: Upload artifact to workflow (backup copy)
@@ -93,20 +104,22 @@ jobs:
           retention-days: 14
 
       - name: Write Play service account key
+        if: ${{ vars.ENABLE_PLAY_UPLOAD == 'true' }}
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
           echo "$PLAY_SERVICE_ACCOUNT_JSON" > play-service-account.json
 
       - name: Upload to Google Play
+        if: ${{ vars.ENABLE_PLAY_UPLOAD == 'true' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJson: play-service-account.json
           packageName: in.facedeliver.app
           releaseFiles: build/app/outputs/bundle/release/app-release.aab
-          # Closed testing lives on the 'internal' or 'alpha'/'beta' tracks.
-          # workflow_dispatch lets you pick; a tag push defaults to internal.
-          track: ${{ github.event.inputs.track || 'internal' }}
+          # Production access is not available yet. Pushes to main therefore
+          # update the active closed-testing track; manual runs can pick one.
+          track: ${{ github.event.inputs.track || 'alpha' }}
           status: completed
 
       - name: Clean up secrets from runner
