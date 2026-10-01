@@ -37,19 +37,29 @@ class GalleryController extends ChangeNotifier {
   /// common state right after an event, while the worker is still processing.
   bool get isAwaitingPhotos => !_loading && _error == null && _gallery.totalPhotos == 0;
 
-  List<GalleryEventGroup> get visibleGroups => _selectedEventId == null
-      ? _gallery.events
-      : _gallery.events
-          .where((group) => group.eventId == _selectedEventId)
-          .toList(growable: false);
+  List<GalleryEventGroup> get visibleGroups => _visibleGroups;
 
   /// Flat list backing the viewer's swipe order, in the same order as shown.
-  List<GalleryPhoto> get visiblePhotos =>
-      [for (final group in visibleGroups) ...group.photos];
+  List<GalleryPhoto> get visiblePhotos => _visiblePhotos;
+
+  // Derived views are recomputed only when the gallery data or the selected
+  // event changes — not on every widget rebuild that reads them.
+  List<GalleryEventGroup> _visibleGroups = const [];
+  List<GalleryPhoto> _visiblePhotos = const [];
+
+  void _recomputeVisible() {
+    _visibleGroups = _selectedEventId == null
+        ? _gallery.events
+        : _gallery.events
+            .where((group) => group.eventId == _selectedEventId)
+            .toList(growable: false);
+    _visiblePhotos = [for (final group in _visibleGroups) ...group.photos];
+  }
 
   void selectEvent(String? eventId) {
     if (_selectedEventId == eventId) return;
     _selectedEventId = eventId;
+    _recomputeVisible();
     notifyListeners();
   }
 
@@ -71,11 +81,13 @@ class GalleryController extends ChangeNotifier {
           !_gallery.events.any((group) => group.eventId == _selectedEventId)) {
         _selectedEventId = null;
       }
+      _recomputeVisible();
     } on ApiException catch (error) {
       // 404 means "registered, nothing matched yet" — an empty state, not a
       // failure worth alarming the guest about.
       if (error.isNotFound) {
         _gallery = GuestGallery.empty;
+        _recomputeVisible();
       } else {
         _error = error.message;
       }

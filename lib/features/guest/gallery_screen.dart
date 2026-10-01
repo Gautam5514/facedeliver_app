@@ -319,6 +319,12 @@ class _EventFilterBar extends StatelessWidget {
 
 /// Two-column mosaic. Heights vary by a hash of the photo id so the layout is
 /// visually alive but never reshuffles between rebuilds.
+///
+/// Built as a lazy sliver: photos are laid out as a sequence of two-up rows
+/// (one tile per column) and only the rows near the viewport are instantiated.
+/// A large wedding gallery can hold hundreds of matched photos — building every
+/// [CachedNetworkImage] up front spiked memory and stalled the first frame, so
+/// the grid is materialised on demand as the guest scrolls instead.
 class _PhotoMosaic extends StatelessWidget {
   const _PhotoMosaic({required this.photos, required this.onOpen});
 
@@ -336,35 +342,46 @@ class _PhotoMosaic extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Alternate the two columns so the mosaic stays balanced.
-    final columns = <List<GalleryPhoto>>[[], []];
-    for (var i = 0; i < photos.length; i++) {
-      columns[i % 2].add(photos[i]);
-    }
+    // Alternate the two columns so the mosaic stays balanced, then pair them
+    // up into rows the sliver can build lazily. Column 0 takes even indices,
+    // column 1 the odd ones — the same distribution as before, just row-wise.
+    final rowCount = (photos.length + 1) ~/ 2;
 
-    return SliverToBoxAdapter(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var c = 0; c < columns.length; c++) ...[
-            if (c > 0) const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                children: [
-                  for (final photo in columns[c])
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _PhotoTile(
-                        photo: photo,
-                        aspect: _aspect(photo.id),
-                        onTap: () => onOpen(photo),
-                      ),
-                    ),
-                ],
-              ),
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, row) {
+          final leftIndex = row * 2;
+          final rightIndex = leftIndex + 1;
+          final left = photos[leftIndex];
+          final right = rightIndex < photos.length ? photos[rightIndex] : null;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _PhotoTile(
+                    photo: left,
+                    aspect: _aspect(left.id),
+                    onTap: () => onOpen(left),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: right == null
+                      ? const SizedBox.shrink()
+                      : _PhotoTile(
+                          photo: right,
+                          aspect: _aspect(right.id),
+                          onTap: () => onOpen(right),
+                        ),
+                ),
+              ],
             ),
-          ],
-        ],
+          );
+        },
+        childCount: rowCount,
       ),
     );
   }
@@ -383,6 +400,15 @@ class _PhotoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A tile is roughly half the screen wide. Decode the bitmap to that width
+    // (in physical pixels) rather than the source's full resolution — a
+    // wedding photo is several thousand pixels wide, and decoding hundreds of
+    // them at full size is the difference between a smooth grid and an
+    // out-of-memory crash.
+    final media = MediaQuery.of(context);
+    final tileWidth = (media.size.width / 2) * media.devicePixelRatio;
+    final decodeWidth = tileWidth.clamp(1.0, 1080.0).round();
+
     return GestureDetector(
       onTap: onTap,
       child: Hero(
@@ -400,6 +426,7 @@ class _PhotoTile extends StatelessWidget {
             child: CachedNetworkImage(
               imageUrl: photo.url,
               fit: BoxFit.cover,
+              memCacheWidth: decodeWidth,
               fadeInDuration: AppTokens.normal,
               placeholder: (_, _) => const ColoredBox(
                 color: AppColors.surfaceAlt,

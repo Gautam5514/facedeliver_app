@@ -100,8 +100,16 @@ class _ScanScreenState extends State<ScanScreen> {
                         onDark: true,
                         tooltip: 'Torch',
                         onPressed: () async {
-                          await _controller.toggleTorch();
-                          if (mounted) setState(() => _torchOn = !_torchOn);
+                          // Only flip the icon once the hardware call
+                          // succeeds — a device without a torch throws, and a
+                          // lying icon is worse than none.
+                          try {
+                            await _controller.toggleTorch();
+                            if (mounted) setState(() => _torchOn = !_torchOn);
+                          } catch (_) {
+                            // Torch unavailable on this device; leave the icon
+                            // in its current (off) state.
+                          }
                         },
                       ),
                     ],
